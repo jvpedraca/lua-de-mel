@@ -680,7 +680,7 @@ function createSeedDatabase(): ERPDatabase {
       rendimento_padrao: 1000,
       estoque_pronto: 450,
       observacoes:
-        'Doce de leite cozido batido com creme de leite e toque de baunilha.',
+        'Leite Condensado Cozido',
     },
     {
       id: 'sub-2',
@@ -2225,7 +2225,59 @@ export default function App() {
         : 'Venda registrada com desconto automático de taxas e estoque!'
     );
   };
+const handleUpdateVendaFluxo = (
+    id: string,
+    atualizado: Omit<VendaFluxo, 'id'>
+  ) => {
+    setDb((prev) => {
+      const antigo = prev.vendas_fluxo.find((v) => v.id === id);
+      if (!antigo) return prev;
 
+      let updatedProdutos = [...prev.produtos];
+
+      // 1. Devolve estoque do lançamento antigo (se era venda de produto)
+      if (
+        (antigo.tipo === 'Venda Direta' ||
+          antigo.tipo === 'Venda Revendedor') &&
+        antigo.produto_id
+      ) {
+        updatedProdutos = updatedProdutos.map((p) =>
+          p.id === antigo.produto_id
+            ? { ...p, estoque_pronto: p.estoque_pronto + antigo.quantidade }
+            : p
+        );
+      }
+
+      // 2. Desconta estoque do lançamento atualizado (se continua sendo venda de produto)
+      if (
+        (atualizado.tipo === 'Venda Direta' ||
+          atualizado.tipo === 'Venda Revendedor') &&
+        atualizado.produto_id
+      ) {
+        updatedProdutos = updatedProdutos.map((p) =>
+          p.id === atualizado.produto_id
+            ? {
+                ...p,
+                estoque_pronto: Math.max(
+                  0,
+                  p.estoque_pronto - atualizado.quantidade
+                ),
+              }
+            : p
+        );
+      }
+
+      return {
+        ...prev,
+        vendas_fluxo: prev.vendas_fluxo.map((v) =>
+          v.id === id ? { ...atualizado, id } : v
+        ),
+        produtos: updatedProdutos,
+      };
+    });
+    addToast('Lançamento atualizado com sucesso!');
+  };
+  
   const handleMarcarComoPago = (id: string) => {
     setDb((prev) => ({
       ...prev,
@@ -2806,7 +2858,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'vendas' && (
+         {activeTab === 'vendas' && (
             <VendasCaixaView
               db={db}
               produtosMap={produtosMap}
@@ -2814,12 +2866,13 @@ export default function App() {
               preloadProdutoId={quickVendaProdutoId}
               onClearPreload={() => setQuickVendaProdutoId(null)}
               onRegister={handleRegisterVendaFluxo}
+              onUpdate={handleUpdateVendaFluxo}
               onMarcarPago={handleMarcarComoPago}
               onAcertoConsignacao={handleAcertoConsignacao}
               onDelete={handleDeleteVendaFluxo}
             />
           )}
-
+          
           {activeTab === 'produtos' && (
             <ProdutosBOMView
               db={db}
@@ -6029,6 +6082,7 @@ function VendasCaixaView({
   preloadProdutoId,
   onClearPreload,
   onRegister,
+  onUpdate,
   onMarcarPago,
   onAcertoConsignacao,
   onDelete,
@@ -6039,6 +6093,7 @@ function VendasCaixaView({
   preloadProdutoId: string | null;
   onClearPreload: () => void;
   onRegister: (novo: Omit<VendaFluxo, 'id'>) => void;
+  onUpdate: (id: string, atualizado: Omit<VendaFluxo, 'id'>) => void;
   onMarcarPago: (id: string) => void;
   onAcertoConsignacao: (
     venda: VendaFluxo,
@@ -6052,6 +6107,7 @@ function VendasCaixaView({
   onDelete: (item: VendaFluxo) => void;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
   const [filtroTipo, setFiltroTipo] = useState<'Todos' | TipoMovimentoCaixa>(
     'Todos'
   );
@@ -6073,6 +6129,7 @@ function VendasCaixaView({
   );
   const [valorComissao, setValorComissao] = useState(0);
   const [descricao, setDescricao] = useState('');
+  const [parcelas, setParcelas] = useState<number>(1);
 
   // Modal Acerto Consignado
   const [acertoVenda, setAcertoVenda] = useState<VendaFluxo | null>(null);
@@ -6114,6 +6171,7 @@ function VendasCaixaView({
 
   const openModalNovo = (preProdId?: string) => {
     const pid = preProdId || db.produtos[0]?.id || '';
+    setEditId(null);
     setTipo('Venda Direta');
     setData(formatDateISO(new Date()));
     setProdutoId(pid);
@@ -6122,7 +6180,24 @@ function VendasCaixaView({
     setFormaPagamento('Pix');
     setStatusPag('Pago');
     setDescricao('');
+    setParcelas(1);
     recalcularValoresAuto('Venda Direta', pid, 1);
+    setModalOpen(true);
+  };
+
+  const openModalEditar = (item: VendaFluxo) => {
+    setEditId(item.id);
+    setTipo(item.tipo);
+    setData(item.data);
+    setProdutoId(item.produto_id || db.produtos[0]?.id || '');
+    setQuantidade(item.quantidade || 1);
+    setCanal(item.canal_ou_revendedor);
+    setFormaPagamento(item.forma_pagamento || 'Pix');
+    setStatusPag(item.status_pagamento);
+    setValorTotal(item.valor_total);
+    setValorComissao(item.valor_comissao || 0);
+    setDescricao(item.descricao || '');
+    setParcelas(1);
     setModalOpen(true);
   };
 
@@ -6134,13 +6209,18 @@ function VendasCaixaView({
   }, [preloadProdutoId]);
 
   const taxaPrevistaRs = useMemo(() => {
-    if (tipo === 'Despesa Operacional') return 0;
+    if (tipo === 'Despesa Operacional' || tipo === 'Perda / Avaria') return 0;
     const pct = db.config.taxas_pagamento[formaPagamento] || 0;
     return Number(((valorTotal * pct) / 100).toFixed(2));
   }, [tipo, formaPagamento, valorTotal, db.config.taxas_pagamento]);
 
   const lucroPrevio = useMemo(() => {
-    if (tipo === 'Despesa Operacional') return -valorTotal;
+    if (tipo === 'Despesa Operacional' || tipo === 'Perda / Avaria') {
+      return -valorTotal;
+    }
+    if (tipo === 'Sinal Encomenda') {
+      return valorTotal - taxaPrevistaRs;
+    }
     const custoUnit =
       produtoMetricasMap.get(produtoId)?.custo_unitario_cmv || 0;
     return valorTotal - valorComissao - taxaPrevistaRs - custoUnit * quantidade;
@@ -6157,21 +6237,84 @@ function VendasCaixaView({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (valorTotal <= 0) return;
-    onRegister({
-      data,
-      tipo,
-      produto_id: tipo === 'Despesa Operacional' ? undefined : produtoId,
-      quantidade: tipo === 'Despesa Operacional' ? 1 : quantidade,
-      canal_ou_revendedor: canal.trim() || 'Geral',
-      forma_pagamento:
-        tipo === 'Despesa Operacional' ? undefined : formaPagamento,
-      status_pagamento: statusPag,
-      valor_total: valorTotal,
-      valor_comissao: tipo === 'Venda Revendedor' ? valorComissao : 0,
-      taxa_pagamento_rs: taxaPrevistaRs,
-      lucro_liquido: Number(lucroPrevio.toFixed(2)),
-      descricao: descricao.trim() || undefined,
-    });
+
+    const isSemProduto =
+      tipo === 'Despesa Operacional' ||
+      tipo === 'Perda / Avaria' ||
+      tipo === 'Sinal Encomenda';
+
+    // Modo Edição de Lançamento Existente
+    if (editId) {
+      onUpdate(editId, {
+        data,
+        tipo,
+        produto_id: isSemProduto ? undefined : produtoId,
+        quantidade: isSemProduto ? 1 : quantidade,
+        canal_ou_revendedor: canal.trim() || 'Geral',
+        forma_pagamento:
+          tipo === 'Despesa Operacional' || tipo === 'Perda / Avaria'
+            ? undefined
+            : formaPagamento,
+        status_pagamento: statusPag,
+        valor_total: valorTotal,
+        valor_comissao: tipo === 'Venda Revendedor' ? valorComissao : 0,
+        taxa_pagamento_rs: taxaPrevistaRs,
+        lucro_liquido: Number(lucroPrevio.toFixed(2)),
+        descricao: descricao.trim() || undefined,
+      });
+      setEditId(null);
+      setModalOpen(false);
+      return;
+    }
+
+    // Modo Novo Lançamento (com suporte a parcelamento 1x a 12x)
+    const numParcelas = Math.max(1, parcelas);
+    const valorParcela = Number((valorTotal / numParcelas).toFixed(2));
+    const comissaoParcela = Number(
+      ((tipo === 'Venda Revendedor' ? valorComissao : 0) / numParcelas).toFixed(
+        2
+      )
+    );
+    const taxaParcela = Number((taxaPrevistaRs / numParcelas).toFixed(2));
+    const lucroParcela = Number((lucroPrevio / numParcelas).toFixed(2));
+
+    for (let idx = 0; idx < numParcelas; idx++) {
+      const parts = data.split('-').map(Number);
+      const dataBase =
+        parts.length === 3
+          ? new Date(parts[0], parts[1] - 1, parts[2])
+          : new Date();
+      dataBase.setMonth(dataBase.getMonth() + idx);
+      const dataParcela = formatDateISO(dataBase);
+
+      const sufixoParcela =
+        numParcelas > 1 ? `Parcela ${idx + 1}/${numParcelas}` : '';
+      const descFinal = [descricao.trim(), sufixoParcela]
+        .filter(Boolean)
+        .join(' • ');
+
+      // Na 1ª parcela passa o produto/quantidade para baixar estoque 1 vez; nas demais apenas o financeiro
+      const isPrimeira = idx === 0;
+      onRegister({
+        data: dataParcela,
+        tipo,
+        produto_id: isSemProduto ? undefined : produtoId,
+        quantidade: isSemProduto ? 1 : isPrimeira ? quantidade : 0,
+        canal_ou_revendedor: canal.trim() || 'Geral',
+        forma_pagamento:
+          tipo === 'Despesa Operacional' || tipo === 'Perda / Avaria'
+            ? undefined
+            : formaPagamento,
+        status_pagamento: isPrimeira ? statusPag : 'Pendente/Consignado',
+        valor_total: valorParcela,
+        valor_comissao: comissaoParcela,
+        taxa_pagamento_rs: taxaParcela,
+        lucro_liquido: lucroParcela,
+        descricao: descFinal || undefined,
+      });
+    }
+
+    setParcelas(1);
     setModalOpen(false);
   };
 
@@ -6226,7 +6369,7 @@ function VendasCaixaView({
             Vendas & Caixa
           </h2>
           <p className="text-sm text-stone-500">
-            Vendas com desconto automático de taxas de pagamento, acerto de
+            Vendas com desconto automático de taxas, parcelamento, acerto de
             consignação e despesas.
           </p>
         </div>
@@ -6380,7 +6523,9 @@ function VendasCaixaView({
                       <p className="font-semibold text-[#291D18]">
                         {isSaida || !prod
                           ? v.canal_ou_revendedor
-                          : `${v.quantidade}x ${prod.nome}`}
+                          : v.quantidade > 0
+                          ? `${v.quantidade}x ${prod.nome}`
+                          : `${prod.nome} (Parcela)`}
                       </p>
                       <p className="text-xs text-stone-500">
                         {v.descricao
@@ -6434,7 +6579,7 @@ function VendasCaixaView({
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-orange-100 text-orange-800">
                           <Clock className="w-3 h-3" />
-                          Consignado
+                          Pendente
                         </span>
                       )}
                     </td>
@@ -6462,7 +6607,16 @@ function VendasCaixaView({
                         )}
                         <button
                           type="button"
+                          onClick={() => openModalEditar(v)}
+                          title="Editar lançamento"
+                          className="p-1.5 rounded-lg text-stone-500 hover:text-amber-700 hover:bg-amber-50"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => onDelete(v)}
+                          title="Excluir lançamento"
                           className="p-1.5 rounded-lg text-stone-400 hover:text-red-600 hover:bg-red-50"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -6477,12 +6631,17 @@ function VendasCaixaView({
         </div>
       </div>
 
-      {/* Modal Nova Venda / Despesa */}
+      {/* Modal Nova / Editar Venda ou Despesa */}
       <ModalWrapper
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title="Novo Lançamento no Caixa"
-        subtitle="Desconto automático de taxas de pagamento, comissões e CMV."
+        onClose={() => {
+          setModalOpen(false);
+          setEditId(null);
+        }}
+        title={
+          editId ? 'Editar Lançamento no Caixa' : 'Novo Lançamento no Caixa'
+        }
+        subtitle="Desconto automático de taxas de pagamento, comissões, parcelamento e CMV."
         maxWidth="max-w-xl"
       >
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -6499,18 +6658,20 @@ function VendasCaixaView({
                 type="button"
                 onClick={() => {
                   setTipo(t);
-                  if (t === 'Venda Revendedor') {
-                    setCanal('Cafeteria Central (Revendedor)');
-                    setStatusPag('Pendente/Consignado');
-                  } else if (t === 'Venda Direta') {
-                    setCanal('Instagram/WhatsApp');
-                    setStatusPag('Pago');
-                  } else {
-                    setCanal('Energia / Gás / Fixo');
-                    setStatusPag('Pago');
-                    setValorTotal(0);
+                  if (!editId) {
+                    if (t === 'Venda Revendedor') {
+                      setCanal('Cafeteria Central (Revendedor)');
+                      setStatusPag('Pendente/Consignado');
+                    } else if (t === 'Venda Direta') {
+                      setCanal('Instagram/WhatsApp');
+                      setStatusPag('Pago');
+                    } else {
+                      setCanal('Energia / Gás / Fixo');
+                      setStatusPag('Pago');
+                      setValorTotal(0);
+                    }
+                    recalcularValoresAuto(t, produtoId, quantidade);
                   }
-                  recalcularValoresAuto(t, produtoId, quantidade);
                 }}
                 className={`py-2.5 px-2 rounded-xl text-xs font-bold border ${
                   tipo === t
@@ -6563,7 +6724,9 @@ function VendasCaixaView({
                     value={produtoId}
                     onChange={(e) => {
                       setProdutoId(e.target.value);
-                      recalcularValoresAuto(tipo, e.target.value, quantidade);
+                      if (!editId) {
+                        recalcularValoresAuto(tipo, e.target.value, quantidade);
+                      }
                     }}
                     className="w-full px-3 py-2.5 rounded-xl border border-stone-300 text-sm bg-white"
                   >
@@ -6582,16 +6745,18 @@ function VendasCaixaView({
                   </label>
                   <input
                     type="number"
-                    min="1"
+                    min="0"
                     required
                     value={quantidade}
                     onChange={(e) => {
                       const q = Math.max(
-                        1,
-                        parseInt(e.target.value || '1', 10)
+                        0,
+                        parseInt(e.target.value || '0', 10)
                       );
                       setQuantidade(q);
-                      recalcularValoresAuto(tipo, produtoId, q);
+                      if (!editId) {
+                        recalcularValoresAuto(tipo, produtoId, q);
+                      }
                     }}
                     className="w-full px-3 py-2.5 rounded-xl border border-stone-300 text-sm font-semibold"
                   />
@@ -6627,7 +6792,7 @@ function VendasCaixaView({
             >
               <label className="block text-xs font-bold text-stone-700 mb-1">
                 {tipo === 'Despesa Operacional'
-                  ? 'Descrição da Despesa'
+                  ? 'Descrição / Categoria da Despesa'
                   : 'Canal ou Revendedor'}
               </label>
               <input
@@ -6658,13 +6823,49 @@ function VendasCaixaView({
                 onChange={(e) => {
                   const val = parseFloat(e.target.value || '0');
                   setValorTotal(val);
-                  if (tipo === 'Venda Revendedor') {
+                  if (tipo === 'Venda Revendedor' && !editId) {
                     const pct =
                       produtosMap.get(produtoId)?.comissao_revendedor_pct || 0;
                     setValorComissao(Number(((val * pct) / 100).toFixed(2)));
                   }
                 }}
                 className="w-full px-3 py-2.5 rounded-xl border border-stone-300 text-sm font-bold"
+              />
+            </div>
+
+            {!editId && (
+              <div>
+                <label className="block text-xs font-bold text-stone-700 mb-1">
+                  Parcelamento
+                </label>
+                <select
+                  value={parcelas}
+                  onChange={(e) => setParcelas(Number(e.target.value))}
+                  className="w-full px-3 py-2.5 rounded-xl border border-stone-300 text-sm bg-white font-semibold"
+                >
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => (
+                    <option key={n} value={n}>
+                      {n === 1
+                        ? 'À vista (1x)'
+                        : `${n}x de ${formatBRL(
+                            Number(valorTotal || 0) / n
+                          )}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className={editId ? 'sm:col-span-2' : ''}>
+              <label className="block text-xs font-bold text-stone-700 mb-1">
+                Observação (opcional)
+              </label>
+              <input
+                type="text"
+                value={descricao}
+                onChange={(e) => setDescricao(e.target.value)}
+                placeholder="Detalhes adicionais..."
+                className="w-full px-3 py-2.5 rounded-xl border border-stone-300 text-sm"
               />
             </div>
 
@@ -6714,7 +6915,10 @@ function VendasCaixaView({
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
-              onClick={() => setModalOpen(false)}
+              onClick={() => {
+                setModalOpen(false);
+                setEditId(null);
+              }}
               className="px-4 py-2.5 rounded-xl text-sm font-semibold text-stone-600 bg-stone-100"
             >
               Cancelar
@@ -6723,7 +6927,7 @@ function VendasCaixaView({
               type="submit"
               className="px-5 py-2.5 rounded-xl text-sm font-bold bg-amber-600 text-white hover:bg-amber-700"
             >
-              Salvar Lançamento
+              {editId ? 'Salvar Alterações' : 'Salvar Lançamento'}
             </button>
           </div>
         </form>
