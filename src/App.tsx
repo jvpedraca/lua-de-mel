@@ -3946,13 +3946,11 @@ function PlanejadorEncomendasView({
       )
       .join('\n');
     const sinalSugerido = mrpCalculo.faturamentoPrevisto * 0.5;
-    const texto = `🍯 *Orçamento — Confeitaria Lua de Mel*\n\n✨ *Itens Selecionados:*\n${linhas}\n\n💰 *Valor Total:* ${formatBRL(
+    const texto = `*Orçamento — Lua de Mel*\n\n *Itens Selecionados:*\n${linhas}\n\n *Valor Total:* ${formatBRL(
       mrpCalculo.faturamentoPrevisto
-    )}\n💳 *Sinal p/ Reserva (50%):* ${formatBRL(
-      sinalSugerido
-    )}\n\n🔑 *Chave Pix:* ${db.config.chave_pix}\nFavorecido: ${
+    )}\n\n  *Chave Pix:* ${db.config.chave_pix}\n ${
       db.config.nome_beneficiario_pix
-    }`;
+    }\n\n Obrigado Pela Preferência! 🐝`;
     copyTextSafe(
       texto,
       'Orçamento com chave Pix copiado para enviar ao cliente!'
