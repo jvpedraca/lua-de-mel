@@ -8123,7 +8123,7 @@ function EstoqueComprasView({
             </label>
             <input
               type="number"
-              step="0.0001"
+              step="any"
               min="0"
               required
               value={insCustoBase}
