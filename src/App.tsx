@@ -4722,7 +4722,7 @@ function PlanejadorEncomendasView({
               </label>
               <input
                 type="number"
-                step="0.01"
+                step="any"
                 min="0"
                 max={mrpCalculo.faturamentoPrevisto}
                 value={encSinal}
@@ -5677,7 +5677,7 @@ function ProducaoView({
               </div>
               <input
                 type="number"
-                step="0.1"
+                step="any"
                 min="0.1"
                 required
                 value={multiplicador}
@@ -6653,7 +6653,7 @@ function VendasCaixaView({
               </label>
               <input
                 type="number"
-                step="0.01"
+                step="any"
                 min="0.01"
                 required
                 value={valorTotal}
@@ -6677,7 +6677,7 @@ function VendasCaixaView({
                 </label>
                 <input
                   type="number"
-                  step="0.01"
+                  step="any"
                   min="0"
                   value={valorComissao}
                   onChange={(e) =>
@@ -7238,7 +7238,7 @@ function ProdutosBOMView({
               </label>
               <input
                 type="number"
-                step="0.1"
+                step="any"
                 min="0"
                 required
                 value={precoVenda}
@@ -7291,7 +7291,7 @@ function ProdutosBOMView({
               </label>
               <input
                 type="number"
-                step="0.5"
+                step="any"
                 min="0"
                 value={custoIndiretoReceita}
                 onChange={(e) =>
@@ -7307,7 +7307,7 @@ function ProdutosBOMView({
               </label>
               <input
                 type="number"
-                step="0.5"
+                step="any"
                 min="0"
                 max="100"
                 value={comissaoPct}
