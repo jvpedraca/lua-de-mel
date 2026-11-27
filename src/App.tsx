@@ -1349,7 +1349,6 @@ const ERPRepository = {
         headers: {
           'Content-Type': 'application/json',
           apikey: anon_key.trim(),
-          Authorization: `Bearer ${anon_key.trim()}`,
           Prefer: 'resolution=merge-duplicates,return=minimal',
         },
         body: JSON.stringify({
@@ -1398,7 +1397,6 @@ const ERPRepository = {
         method: 'GET',
         headers: {
           apikey: cfg.anon_key.trim(),
-          Authorization: `Bearer ${cfg.anon_key.trim()}`,
         },
       });
       if (!res.ok) {
